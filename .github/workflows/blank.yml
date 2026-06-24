@@ -17,7 +17,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Create proper project structure
+      - name: Create project structure
         run: |
           mkdir -p app/src/main/java/com/aistudio/cointap/qpksmx
           mkdir -p app/src/main/res/values
@@ -27,50 +27,48 @@ jobs:
           mkdir -p app/src/androidTest/java/com/aistudio/cointap/qpksmx
           mkdir -p gradle/wrapper
 
-          cp build.gradle.kts app/build.gradle.kts
-
           for f in MainActivity AppDatabase Color GameRepository \
                    GameStats GameStatsDao GameViewModel \
                    SoundManager Theme Type; do
-            [ -f "${f}.kt" ] && cp "${f}.kt" \
-              app/src/main/java/com/aistudio/cointap/qpksmx/
+            [ -f "${f}.kt" ] && \
+              cp "${f}.kt" app/src/main/java/com/aistudio/cointap/qpksmx/
           done
 
           for f in ExampleUnitTest ExampleRobolectricTest \
                    GreetingScreenshotTest; do
-            [ -f "${f}.kt" ] && cp "${f}.kt" \
-              app/src/test/java/com/aistudio/cointap/qpksmx/
+            [ -f "${f}.kt" ] && \
+              cp "${f}.kt" app/src/test/java/com/aistudio/cointap/qpksmx/
           done
-          [ -f ExampleInstrumentedTest.kt ] && cp ExampleInstrumentedTest.kt \
+          [ -f ExampleInstrumentedTest.kt ] && \
+            cp ExampleInstrumentedTest.kt \
             app/src/androidTest/java/com/aistudio/cointap/qpksmx/
 
           [ -f AndroidManifest.xml ] && cp AndroidManifest.xml app/src/main/
-          [ -f strings.xml ]         && cp strings.xml app/src/main/res/values/
-          [ -f colors.xml ]          && cp colors.xml  app/src/main/res/values/
-          [ -f themes.xml ]          && cp themes.xml  app/src/main/res/values/
-          [ -f backup_rules.xml ]    && cp backup_rules.xml \
-            app/src/main/res/xml/
-          [ -f data_extraction_rules.xml ] && cp data_extraction_rules.xml \
-            app/src/main/res/xml/
+          [ -f strings.xml ]  && cp strings.xml  app/src/main/res/values/
+          [ -f colors.xml ]   && cp colors.xml   app/src/main/res/values/
+          [ -f themes.xml ]   && cp themes.xml   app/src/main/res/values/
+          [ -f backup_rules.xml ] && \
+            cp backup_rules.xml app/src/main/res/xml/
+          [ -f data_extraction_rules.xml ] && \
+            cp data_extraction_rules.xml app/src/main/res/xml/
 
           for f in ic_launcher.xml ic_launcher_round.xml \
                    ic_launcher_background.xml ic_launcher_foreground.xml; do
             [ -f "$f" ] && cp "$f" app/src/main/res/drawable/
           done
-
           find . -maxdepth 1 \( -name "*.jpg" -o -name "*.png" \
-            -o -name "*.webp" \) -exec cp {} \
-            app/src/main/res/drawable/ \; 2>/dev/null || true
+            -o -name "*.webp" \) \
+            -exec cp {} app/src/main/res/drawable/ \; 2>/dev/null || true
 
+          [ -f build.gradle.kts ]   && cp build.gradle.kts app/build.gradle.kts
           [ -f proguard-rules.pro ] && cp proguard-rules.pro app/
           [ -f libs.versions.toml ] && cp libs.versions.toml gradle/
 
-          echo "=== Files in app/src/main ==="
-          find app/src/main -type f | sort
+          echo "=== Structure ===" && find app/src -type f | sort
 
       - name: Create root build.gradle.kts
         run: |
-          cat > build.gradle.kts << 'ROOTGRADLE'
+          cat > build.gradle.kts << 'EOF'
           plugins {
               alias(libs.plugins.android.application) apply false
               alias(libs.plugins.kotlin.compose) apply false
@@ -78,9 +76,9 @@ jobs:
               alias(libs.plugins.roborazzi) apply false
               alias(libs.plugins.secrets) apply false
           }
-          ROOTGRADLE
+          EOF
 
-      - name: Setup local.properties and env files
+      - name: Setup local.properties and env
         run: |
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           touch .env
@@ -89,7 +87,7 @@ jobs:
 
       - name: Create google-services.json
         run: |
-          cat > app/google-services.json << 'GSJSON'
+          cat > app/google-services.json << 'EOF'
           {
             "project_info": {
               "project_number": "000000000000",
@@ -104,7 +102,7 @@ jobs:
                 }
               },
               "oauth_client": [],
-              "api_key": [{"current_key": "mock-debug-key"}],
+              "api_key": [{"current_key": "debug-key"}],
               "services": {
                 "appinvite_service": {
                   "other_platform_oauth_client": []
@@ -113,9 +111,9 @@ jobs:
             }],
             "configuration_version": "1"
           }
-          GSJSON
+          EOF
 
-      - name: Download Gradle and create wrapper
+      - name: Setup Gradle 9.3.1 wrapper
         run: |
           GRADLE_VER="9.3.1"
           curl -sL \
@@ -125,52 +123,59 @@ jobs:
           /tmp/gradle-${GRADLE_VER}/bin/gradle wrapper \
             --gradle-version=${GRADLE_VER} --distribution-type=bin
           chmod +x gradlew
-          echo "gradlew created ✅"
+          echo "Gradle wrapper ready ✅"
 
-      - name: Fix compileSdk syntax if needed
-      
-        run: |- name: Remove signing config for debug build
+      - name: Fix app/build.gradle.kts
         run: |
-          python3 - << 'PYEOF'
-          lines = open('app/build.gradle.kts').readlines()
-          output = []
+          python3 << 'PYEOF'
+          import re
+
+          with open('app/build.gradle.kts', 'r') as f:
+              content = f.read()
+
+          lines = content.split('\n')
+          result = []
           skip = False
           depth = 0
-          i = 0
-          while i < len(lines):
-              line = lines[i]
-              if 'signingConfigs {' in line.strip():
+
+          for line in lines:
+              stripped = line.strip()
+
+              # Fix compileSdk block syntax
+              if not skip and re.match(r'compileSdk\s*\{', stripped):
+                  pad = len(line) - len(line.lstrip())
+                  result.append(' ' * pad + 'compileSdk = 36')
+                  continue
+
+              # Skip signingConfigs and secrets blocks
+              if not skip and (
+                  re.match(r'signingConfigs\s*\{', stripped) or
+                  re.match(r'secrets\s*\{', stripped)
+              ):
                   skip = True
                   depth = line.count('{') - line.count('}')
-                  i += 1
                   continue
+
               if skip:
                   depth += line.count('{') - line.count('}')
                   if depth <= 0:
                       skip = False
-                  i += 1
                   continue
-              if 'signingConfig =' in line and 'signingConfigs' in line:
-                  i += 1
+
+              # Remove signingConfig reference lines
+              if 'signingConfig' in line and 'signingConfigs' in line:
                   continue
-              output.append(line)
-              i += 1
-          open('app/build.gradle.kts', 'w').writelines(output)
-          print("Signing config removed ✅")
-          PYEOF
-          python3 - << 'PYEOF'
-          import re
-          with open('app/build.gradle.kts', 'r') as f:
-              content = f.read()
-          fixed = re.sub(
-            r'compileSdk\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}',
-            'compileSdk = 36', content)
-          if fixed != content:
-              with open('app/build.gradle.kts', 'w') as f:
-                  f.write(fixed)
-              print("compileSdk syntax fixed ✅")
-          else:
-              print("compileSdk syntax was already OK")
+
+              # Remove secrets/roborazzi plugin aliases from app plugins block
+              if re.search(r'alias\(libs\.plugins\.(secrets|roborazzi)\)', line):
+                  continue
+
+              result.append(line)
+
+          with open('app/build.gradle.kts', 'w') as f:
+              f.write('\n'.join(result))
+
+          print("app/build.gradle.kts fixed ✅")
           PYEOF
 
       - name: Build Debug APK
@@ -178,15 +183,12 @@ jobs:
           ./gradlew assembleDebug \
             -x test \
             -x connectedAndroidTest \
-            --stacktrace \
-            --no-daemon
-        env:
-          KEYSTORE_PATH: ""
-          STORE_PASSWORD: ""
-          KEY_PASSWORD: ""
+            --no-daemon \
+            --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TapCoinEmpire-Debug-APK
+          name: TapCoinEmpire-Debug
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
