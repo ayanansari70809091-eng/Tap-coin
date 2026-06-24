@@ -117,7 +117,7 @@ jobs:
 
       - name: Download Gradle and create wrapper
         run: |
-          GRADLE_VER="8.10.2"
+          GRADLE_VER="9.3.1"
           curl -sL \
             "https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip" \
             -o /tmp/gradle.zip
