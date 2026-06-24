@@ -128,7 +128,36 @@ jobs:
           echo "gradlew created ✅"
 
       - name: Fix compileSdk syntax if needed
+      
+        run: |- name: Remove signing config for debug build
         run: |
+          python3 - << 'PYEOF'
+          lines = open('app/build.gradle.kts').readlines()
+          output = []
+          skip = False
+          depth = 0
+          i = 0
+          while i < len(lines):
+              line = lines[i]
+              if 'signingConfigs {' in line.strip():
+                  skip = True
+                  depth = line.count('{') - line.count('}')
+                  i += 1
+                  continue
+              if skip:
+                  depth += line.count('{') - line.count('}')
+                  if depth <= 0:
+                      skip = False
+                  i += 1
+                  continue
+              if 'signingConfig =' in line and 'signingConfigs' in line:
+                  i += 1
+                  continue
+              output.append(line)
+              i += 1
+          open('app/build.gradle.kts', 'w').writelines(output)
+          print("Signing config removed ✅")
+          PYEOF
           python3 - << 'PYEOF'
           import re
           with open('app/build.gradle.kts', 'r') as f:
