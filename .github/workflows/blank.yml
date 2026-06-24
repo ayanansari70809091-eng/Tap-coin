@@ -1,36 +1,163 @@
-# This is a basic workflow to help you get started with Actions
+name: Build Android APK
 
-name: CI
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-  # Allows you to run this workflow manually from the Actions tab
+    branches: [ main ]
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
   build:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v4
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
+      - name: Create proper project structure
         run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+          mkdir -p app/src/main/java/com/aistudio/cointap/qpksmx
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/xml
+          mkdir -p app/src/test/java/com/aistudio/cointap/qpksmx
+          mkdir -p app/src/androidTest/java/com/aistudio/cointap/qpksmx
+          mkdir -p gradle/wrapper
+
+          cp build.gradle.kts app/build.gradle.kts
+
+          for f in MainActivity AppDatabase Color GameRepository \
+                   GameStats GameStatsDao GameViewModel \
+                   SoundManager Theme Type; do
+            [ -f "${f}.kt" ] && cp "${f}.kt" \
+              app/src/main/java/com/aistudio/cointap/qpksmx/
+          done
+
+          for f in ExampleUnitTest ExampleRobolectricTest \
+                   GreetingScreenshotTest; do
+            [ -f "${f}.kt" ] && cp "${f}.kt" \
+              app/src/test/java/com/aistudio/cointap/qpksmx/
+          done
+          [ -f ExampleInstrumentedTest.kt ] && cp ExampleInstrumentedTest.kt \
+            app/src/androidTest/java/com/aistudio/cointap/qpksmx/
+
+          [ -f AndroidManifest.xml ] && cp AndroidManifest.xml app/src/main/
+          [ -f strings.xml ]         && cp strings.xml app/src/main/res/values/
+          [ -f colors.xml ]          && cp colors.xml  app/src/main/res/values/
+          [ -f themes.xml ]          && cp themes.xml  app/src/main/res/values/
+          [ -f backup_rules.xml ]    && cp backup_rules.xml \
+            app/src/main/res/xml/
+          [ -f data_extraction_rules.xml ] && cp data_extraction_rules.xml \
+            app/src/main/res/xml/
+
+          for f in ic_launcher.xml ic_launcher_round.xml \
+                   ic_launcher_background.xml ic_launcher_foreground.xml; do
+            [ -f "$f" ] && cp "$f" app/src/main/res/drawable/
+          done
+
+          find . -maxdepth 1 \( -name "*.jpg" -o -name "*.png" \
+            -o -name "*.webp" \) -exec cp {} \
+            app/src/main/res/drawable/ \; 2>/dev/null || true
+
+          [ -f proguard-rules.pro ] && cp proguard-rules.pro app/
+          [ -f libs.versions.toml ] && cp libs.versions.toml gradle/
+
+          echo "=== Files in app/src/main ==="
+          find app/src/main -type f | sort
+
+      - name: Create root build.gradle.kts
+        run: |
+          cat > build.gradle.kts << 'ROOTGRADLE'
+          plugins {
+              alias(libs.plugins.android.application) apply false
+              alias(libs.plugins.kotlin.compose) apply false
+              alias(libs.plugins.google.devtools.ksp) apply false
+              alias(libs.plugins.roborazzi) apply false
+              alias(libs.plugins.secrets) apply false
+          }
+          ROOTGRADLE
+
+      - name: Setup local.properties and env files
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          touch .env
+          printf "KEYSTORE_PATH=\nSTORE_PASSWORD=\nKEY_PASSWORD=\n" \
+            > .env.example
+
+      - name: Create google-services.json
+        run: |
+          cat > app/google-services.json << 'GSJSON'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "tapcoin-debug",
+              "storage_bucket": "tapcoin-debug.appspot.com"
+            },
+            "client": [{
+              "client_info": {
+                "mobilesdk_app_id": "1:000000000000:android:abc123def456",
+                "android_client_info": {
+                  "package_name": "com.aistudio.cointap.qpksmx"
+                }
+              },
+              "oauth_client": [],
+              "api_key": [{"current_key": "mock-debug-key"}],
+              "services": {
+                "appinvite_service": {
+                  "other_platform_oauth_client": []
+                }
+              }
+            }],
+            "configuration_version": "1"
+          }
+          GSJSON
+
+      - name: Download Gradle and create wrapper
+        run: |
+          GRADLE_VER="8.10.2"
+          curl -sL \
+            "https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip" \
+            -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp/
+          /tmp/gradle-${GRADLE_VER}/bin/gradle wrapper \
+            --gradle-version=${GRADLE_VER} --distribution-type=bin
+          chmod +x gradlew
+          echo "gradlew created ✅"
+
+      - name: Fix compileSdk syntax if needed
+        run: |
+          python3 - << 'PYEOF'
+          import re
+          with open('app/build.gradle.kts', 'r') as f:
+              content = f.read()
+          fixed = re.sub(
+            r'compileSdk\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}',
+            'compileSdk = 36', content)
+          if fixed != content:
+              with open('app/build.gradle.kts', 'w') as f:
+                  f.write(fixed)
+              print("compileSdk syntax fixed ✅")
+          else:
+              print("compileSdk syntax was already OK")
+          PYEOF
+
+      - name: Build Debug APK
+        run: |
+          ./gradlew assembleDebug \
+            -x test \
+            -x connectedAndroidTest \
+            --stacktrace \
+            --no-daemon
+        env:
+          KEYSTORE_PATH: ""
+          STORE_PASSWORD: ""
+          KEY_PASSWORD: ""
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TapCoinEmpire-Debug-APK
+          path: app/build/outputs/apk/debug/*.apk
